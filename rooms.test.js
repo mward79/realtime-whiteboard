@@ -60,3 +60,38 @@ test('snapshot preserves draw order', () => {
   begin(room, 'a', { id: 'second' });
   assert.deepEqual(room.snapshot().strokes.map((s) => s.id), ['first', 'second']);
 });
+
+const add = (room, userId, overrides = {}) =>
+  room.addItem(userId, { id: 'i1', kind: 'rect', color: PALETTE[1], size: 3, points: [[0, 0], [50, 40]], ...overrides });
+
+test('shapes are added complete and cannot be extended', () => {
+  const room = new Room('r');
+  for (const kind of ['rect', 'ellipse', 'line', 'arrow']) assert.ok(add(room, 'a', { id: kind, kind }));
+  assert.equal(room.addPoints('a', 'rect', [[1, 1]]), false);
+  assert.deepEqual(room.snapshot().strokes.map((s) => s.kind), ['rect', 'ellipse', 'line', 'arrow']);
+});
+
+test('invalid shapes are rejected', () => {
+  const room = new Room('r');
+  assert.equal(add(room, 'a', { kind: 'star' }), null);
+  assert.equal(add(room, 'a', { points: [[0, 0]] }), null);
+  assert.equal(add(room, 'a', { points: [[0, 0], [Infinity, 1]] }), null);
+  assert.equal(add(room, 'a', { color: 'red' }), null);
+  assert.equal(add(room, 'a', { size: 500 }), null);
+});
+
+test('text items need a single point and non-empty text', () => {
+  const room = new Room('r');
+  const text = { kind: 'text', points: [[5, 5]], size: 20 };
+  assert.equal(add(room, 'a', { ...text, text: '   ' }), null);
+  assert.equal(add(room, 'a', { ...text, text: 'x'.repeat(1001) }), null);
+  assert.equal(add(room, 'a', { ...text, points: [[5, 5], [6, 6]], text: 'hi' }), null);
+  assert.equal(add(room, 'a', { ...text, text: 'hello\nworld' }).text, 'hello\nworld');
+});
+
+test('only the owner can remove a shape or text', () => {
+  const room = new Room('r');
+  add(room, 'a');
+  assert.equal(room.removeStroke('b', 'i1'), false);
+  assert.equal(room.removeStroke('a', 'i1'), true);
+});

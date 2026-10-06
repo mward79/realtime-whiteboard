@@ -17,6 +17,7 @@
       --surface: #ffffff;
       --line: #d5dbe3;
       --focus: #2557d6;
+      --grid-x: 0px; --grid-y: 0px; --grid-minor: 24px; --grid-major: 120px;
       font-family: 'Bricolage Grotesque', system-ui, -apple-system, 'Segoe UI', sans-serif;
     }
     html, body { margin: 0; height: 100%; overflow: hidden; color: var(--ink); }
@@ -27,10 +28,24 @@
         linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
         linear-gradient(var(--grid) 1px, transparent 1px),
         linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-      background-size: 120px 120px, 120px 120px, 24px 24px, 24px 24px;
+      background-size: var(--grid-major) var(--grid-major), var(--grid-major) var(--grid-major),
+                       var(--grid-minor) var(--grid-minor), var(--grid-minor) var(--grid-minor);
+      background-position: var(--grid-x) var(--grid-y);
     }
+    body.zoomed-out { --grid: transparent; }
+    [hidden] { display: none !important; }
 
     #board { position: fixed; inset: 0; touch-action: none; cursor: crosshair; }
+    #board[data-tool="hand"], #board.space-pan { cursor: grab; }
+    #board[data-tool="text"] { cursor: text; }
+    #board.panning { cursor: grabbing; }
+
+    .text-editor {
+      position: fixed; margin: 0; padding: 0; border: 0; resize: none; overflow: hidden;
+      background: transparent; white-space: pre; line-height: 1.25;
+      font-family: inherit; min-width: 4px;
+      outline: 1px dashed var(--focus); outline-offset: 4px;
+    }
     #cursors { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
 
     .cursor { position: absolute; left: 0; top: 0; transition: transform 80ms linear, opacity 300ms; }
@@ -49,7 +64,7 @@
       border-radius: 10px; padding: 7px 12px; cursor: pointer;
     }
     button:hover { border-color: var(--muted); }
-    button:focus-visible, input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+    button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
     .topbar {
       position: fixed;
@@ -70,6 +85,18 @@
       font-size: 12px; font-weight: 700;
     }
     #share { margin-left: auto; }
+    .room-name { cursor: pointer; white-space: nowrap; }
+    #share { white-space: nowrap; }
+    @media (max-width: 520px) {
+      .topbar { gap: 8px; }
+      .wide-only { display: none; }
+    }
+    .home {
+      display: grid; place-items: center; width: 36px; height: 36px; box-sizing: border-box; flex-shrink: 0;
+      background: var(--surface); border: 1px solid var(--line); border-radius: 10px; color: var(--ink);
+    }
+    .home:hover { border-color: var(--muted); }
+    .home svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
     .tray {
       position: fixed; left: 50%; transform: translateX(-50%);
@@ -85,7 +112,53 @@
       background: var(--c); border: 3px solid var(--surface); box-shadow: 0 0 0 1px var(--line);
     }
     .swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--c); }
-    .toggle[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+    .tools { display: flex; gap: 2px; }
+    .tool { width: 36px; height: 36px; padding: 0; display: grid; place-items: center; border-color: transparent; }
+    .tool svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .tool[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+    .zoom {
+      position: fixed; right: 12px; bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+      display: flex; gap: 2px; background: var(--surface); border: 1px solid var(--line);
+      border-radius: 12px; padding: 4px; box-shadow: 0 6px 24px rgba(30, 40, 60, 0.12);
+    }
+    .zoom button { border-color: transparent; padding: 5px 9px; min-width: 32px; }
+    #zoom-level { min-width: 56px; font-variant-numeric: tabular-nums; }
+    @media (max-width: 1100px) {
+      .zoom { bottom: auto; top: calc(60px + env(safe-area-inset-top, 0px)); }
+    }
+
+    /* ---------- Start menu ---------- */
+    .lobby { position: fixed; inset: 0; overflow-y: auto; display: grid; place-items: center; padding: 24px 16px; box-sizing: border-box; }
+    .card {
+      width: 100%; max-width: 420px; box-sizing: border-box;
+      background: var(--surface); border: 1px solid var(--line); border-radius: 20px;
+      padding: 28px; box-shadow: 0 12px 40px rgba(30, 40, 60, 0.12);
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .card h1 { margin: 0; font-size: 32px; font-weight: 700; letter-spacing: -0.02em; }
+    .lede { margin: -6px 0 6px; color: var(--muted); }
+    .field { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--muted); }
+    .card input {
+      font: inherit; font-size: 16px; color: var(--ink); background: var(--surface);
+      border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; min-width: 0;
+    }
+    .primary { background: var(--ink); color: var(--paper); border-color: var(--ink); font-size: 16px; font-weight: 600; padding: 12px; }
+    .primary:hover { background: #000; }
+    .divider { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+    .divider::before, .divider::after { content: ''; flex: 1; border-top: 1px solid var(--line); }
+    .join { display: flex; gap: 8px; }
+    .join input { flex: 1; }
+    .join button { font-size: 16px; padding: 9px 16px; }
+    .error { margin: -8px 0 0; color: #d6352a; font-size: 14px; }
+    .error:empty { display: none; }
+    .recent h2 { margin: 6px 0 8px; font-size: 14px; font-weight: 600; color: var(--muted); }
+    .recent ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    .recent li { display: flex; gap: 6px; }
+    .recent-open { flex: 1; display: flex; justify-content: space-between; align-items: baseline; text-align: left; }
+    .recent-open span { color: var(--muted); font-size: 13px; }
+    .recent-remove { padding: 7px 11px; color: var(--muted); }
+    .note { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
     .size { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
 
     #status {
@@ -98,25 +171,91 @@
   </style>
 </head>
 <body>
-  <canvas id="board" aria-label="Shared drawing board"></canvas>
-  <div id="cursors"></div>
+  <main id="lobby" class="lobby" hidden>
+    <div class="card">
+      <h1>Whiteboard</h1>
+      <p class="lede">Sketch, write and diagram together in real time.</p>
 
-  <header class="topbar">
-    <div class="room-name">Room <strong id="room-name"></strong></div>
-    <ul id="people" aria-label="People in this room"></ul>
-    <button id="share">Copy invite link</button>
-  </header>
+      <label class="field">
+        <span>Your name</span>
+        <input id="name" maxlength="24" autocomplete="nickname" />
+      </label>
 
-  <div id="status" role="status"></div>
+      <button id="create" class="primary">Start a new whiteboard</button>
 
-  <nav class="tray" aria-label="Drawing tools">
-    <div class="swatches" id="swatches"></div>
-    <button id="eraser" class="toggle" aria-pressed="false">Eraser</button>
-    <label class="size">Size <input type="range" id="size" min="1" max="24" value="4" /></label>
-    <button id="undo">Undo</button>
-    <button id="clear">Clear board</button>
-  </nav>
+      <div class="divider"><span>or join someone else's</span></div>
 
-  <script src="app.js"></script>
+      <form id="join-form" class="join">
+        <input id="join-code" placeholder="Room code or invite link" aria-label="Room code or invite link"
+               autocapitalize="off" autocomplete="off" spellcheck="false" />
+        <button type="submit">Join</button>
+      </form>
+      <p id="join-error" class="error" role="alert"></p>
+
+      <section id="recent-wrap" class="recent" hidden>
+        <h2>Recent boards</h2>
+        <ul id="recent"></ul>
+      </section>
+
+      <p class="note">Boards stay open while anyone is in them, and for 10 minutes after the last person leaves.</p>
+    </div>
+  </main>
+
+  <div id="board-ui" hidden>
+    <canvas id="board" aria-label="Shared drawing board"></canvas>
+    <div id="cursors"></div>
+
+    <header class="topbar">
+      <a class="home" href="./" aria-label="Back to menu" title="Back to menu">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+      </a>
+      <button id="room-code" class="room-name" title="Copy room code"><span class="wide-only">Room </span><strong id="room-name"></strong></button>
+      <ul id="people" aria-label="People in this room"></ul>
+      <button id="share">Copy invite link</button>
+    </header>
+
+    <div id="status" role="status"></div>
+
+    <nav class="tray" aria-label="Drawing tools">
+      <div class="tools" role="group" aria-label="Tool">
+        <button class="tool" data-tool="pen" aria-label="Pen" title="Pen (P)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1-5L16 4l4 4L9 19z"/></svg>
+        </button>
+        <button class="tool" data-tool="hand" aria-label="Move around" title="Move around (H, or hold Space)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></svg>
+        </button>
+        <button class="tool" data-tool="text" aria-label="Text" title="Text (T)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg>
+        </button>
+        <button class="tool" data-tool="rect" aria-label="Rectangle" title="Rectangle (R)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="6" width="16" height="12" rx="1"/></svg>
+        </button>
+        <button class="tool" data-tool="ellipse" aria-label="Ellipse" title="Ellipse (O)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="12" rx="8" ry="6"/></svg>
+        </button>
+        <button class="tool" data-tool="line" aria-label="Line" title="Line (L)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19L19 5"/></svg>
+        </button>
+        <button class="tool" data-tool="arrow" aria-label="Arrow" title="Arrow (A)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19L19 5M11 5h8v8"/></svg>
+        </button>
+        <button class="tool" data-tool="eraser" aria-label="Eraser" title="Eraser (E)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 20h12M4 15l9-9 6 6-8 8H8z"/></svg>
+        </button>
+      </div>
+      <div class="swatches" id="swatches"></div>
+      <label class="size">Size <input type="range" id="size" min="1" max="24" value="4" /></label>
+      <button id="undo">Undo</button>
+      <button id="clear">Clear board</button>
+    </nav>
+
+    <div class="zoom" role="group" aria-label="Zoom">
+      <button id="zoom-out" aria-label="Zoom out" title="Zoom out (−)">−</button>
+      <button id="zoom-level" title="Reset view (0)">100%</button>
+      <button id="zoom-in" aria-label="Zoom in" title="Zoom in (+)">+</button>
+    </div>
+  </div>
+
+  <script type="module" src="main.js"></script>
 </body>
 </html>

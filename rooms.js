@@ -7,6 +7,9 @@ const MAX_POINTS_PER_STROKE = 4000;
 const MAX_STROKES_PER_ROOM = 10000;
 const MAX_POINTS_PER_MESSAGE = 200;
 const MAX_SIZE = 128;
+const MAX_TEXT_LENGTH = 1000;
+
+export const SHAPES = ['rect', 'ellipse', 'line', 'arrow'];
 
 const isId = (v) => typeof v === 'string' && v.length > 0 && v.length <= 64;
 export const isCoord = (v) => Number.isFinite(v) && Math.abs(v) <= 100000;
@@ -48,6 +51,7 @@ export class Room {
     const stroke = {
       id,
       userId,
+      kind: 'path',
       color: erase ? null : color,
       size,
       erase: Boolean(erase),
@@ -66,6 +70,28 @@ export class Room {
     if (s.points.length + points.length > MAX_POINTS_PER_STROKE) return false;
     s.points.push(...points);
     return true;
+  }
+
+  // Shapes and text arrive complete in one message, unlike freehand strokes.
+  addItem(userId, { id, kind, color, size, points, text }) {
+    if (!isId(id) || this.strokes.has(id)) return null;
+    if (this.strokes.size >= MAX_STROKES_PER_ROOM) return null;
+    if (!PALETTE.includes(color)) return null;
+    if (!Number.isFinite(size) || size < 1 || size > MAX_SIZE) return null;
+    if (!Array.isArray(points) || !points.every(isPoint)) return null;
+
+    const item = { id, userId, kind, color, size, erase: false, points: points.map(([x, y]) => [x, y]), done: true };
+    if (SHAPES.includes(kind)) {
+      if (points.length !== 2) return null;
+    } else if (kind === 'text') {
+      if (points.length !== 1) return null;
+      if (typeof text !== 'string' || !text.trim() || text.length > MAX_TEXT_LENGTH) return null;
+      item.text = text;
+    } else {
+      return null;
+    }
+    this.strokes.set(id, item);
+    return item;
   }
 
   endStroke(userId, strokeId) {

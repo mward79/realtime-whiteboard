@@ -31,7 +31,7 @@ function broadcast(roomId, msg, except) {
 
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url, 'http://localhost');
-  const roomId = clean(url.searchParams.get('room'), 32) || 'lobby';
+  const roomId = clean(url.searchParams.get('room'), 32).toLowerCase() || 'lobby';
   const name = clean(url.searchParams.get('name'), 24) || 'Guest';
 
   const room = rooms.get(roomId);
@@ -75,6 +75,13 @@ wss.on('connection', (ws, req) => {
           broadcast(roomId, { type: 'stroke:points', id: msg.id, points: msg.points }, ws);
         }
         break;
+
+      case 'item:add': {
+        const item = room.addItem(userId, msg);
+        if (item) broadcast(roomId, { type: 'item:add', item }, ws);
+        else send(ws, { type: 'stroke:rejected', id: msg.id });
+        break;
+      }
 
       case 'stroke:end':
         room.endStroke(userId, msg.id);
