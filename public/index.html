@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Whiteboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --paper: #f7f9fb;
+      --grid: #e4eaf1;
+      --grid-major: #d2dbe6;
+      --ink: #1d1d1b;
+      --muted: #5b6573;
+      --surface: #ffffff;
+      --line: #d5dbe3;
+      --focus: #2557d6;
+      font-family: 'Bricolage Grotesque', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    }
+    html, body { margin: 0; height: 100%; overflow: hidden; color: var(--ink); }
+    body {
+      background-color: var(--paper);
+      background-image:
+        linear-gradient(var(--grid-major) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
+        linear-gradient(var(--grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+      background-size: 120px 120px, 120px 120px, 24px 24px, 24px 24px;
+    }
+
+    #board { position: fixed; inset: 0; touch-action: none; cursor: crosshair; }
+    #cursors { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+
+    .cursor { position: absolute; left: 0; top: 0; transition: transform 80ms linear, opacity 300ms; }
+    .cursor.idle { opacity: 0.3; }
+    .cursor svg { display: block; }
+    .cursor span {
+      position: absolute; left: 14px; top: 16px;
+      background: var(--c); color: #fff;
+      font-size: 12px; font-weight: 600; white-space: nowrap;
+      padding: 2px 8px; border-radius: 6px;
+    }
+
+    button {
+      font: inherit; font-size: 14px; color: var(--ink);
+      background: var(--surface); border: 1px solid var(--line);
+      border-radius: 10px; padding: 7px 12px; cursor: pointer;
+    }
+    button:hover { border-color: var(--muted); }
+    button:focus-visible, input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+    .topbar {
+      position: fixed;
+      top: calc(12px + env(safe-area-inset-top, 0px)); left: 12px; right: 12px;
+      display: flex; align-items: center; gap: 14px; pointer-events: none;
+    }
+    .topbar > * { pointer-events: auto; }
+    .room-name {
+      background: var(--surface); border: 1px solid var(--line);
+      border-radius: 10px; padding: 6px 12px; font-size: 14px; color: var(--muted);
+    }
+    .room-name strong { color: var(--ink); font-weight: 600; }
+    #people { display: flex; list-style: none; margin: 0 0 0 6px; padding: 0; }
+    #people li {
+      width: 30px; height: 30px; margin-left: -6px; border-radius: 50%;
+      display: grid; place-items: center;
+      background: var(--c); color: #fff; border: 2px solid var(--paper);
+      font-size: 12px; font-weight: 700;
+    }
+    #share { margin-left: auto; }
+
+    .tray {
+      position: fixed; left: 50%; transform: translateX(-50%);
+      bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+      display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px;
+      max-width: calc(100vw - 24px); box-sizing: border-box;
+      background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+      padding: 8px 10px; box-shadow: 0 6px 24px rgba(30, 40, 60, 0.12);
+    }
+    .swatches { display: flex; gap: 6px; }
+    .swatch {
+      width: 28px; height: 28px; padding: 0; border-radius: 50%;
+      background: var(--c); border: 3px solid var(--surface); box-shadow: 0 0 0 1px var(--line);
+    }
+    .swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--c); }
+    .toggle[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+    .size { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
+
+    #status {
+      position: fixed; top: calc(60px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%);
+      background: var(--ink); color: var(--paper); font-size: 13px; padding: 5px 10px; border-radius: 8px;
+    }
+    #status:empty { display: none; }
+
+    @media (prefers-reduced-motion: reduce) { .cursor { transition: none; } }
+  </style>
+</head>
+<body>
+  <canvas id="board" aria-label="Shared drawing board"></canvas>
+  <div id="cursors"></div>
+
+  <header class="topbar">
+    <div class="room-name">Room <strong id="room-name"></strong></div>
+    <ul id="people" aria-label="People in this room"></ul>
+    <button id="share">Copy invite link</button>
+  </header>
+
+  <div id="status" role="status"></div>
+
+  <nav class="tray" aria-label="Drawing tools">
+    <div class="swatches" id="swatches"></div>
+    <button id="eraser" class="toggle" aria-pressed="false">Eraser</button>
+    <label class="size">Size <input type="range" id="size" min="1" max="24" value="4" /></label>
+    <button id="undo">Undo</button>
+    <button id="clear">Clear board</button>
+  </nav>
+
+  <script src="app.js"></script>
+</body>
+</html>
