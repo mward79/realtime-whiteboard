@@ -1,3 +1,5 @@
+![Tests](https://github.com/mward79/realtime-whiteboard/actions/workflows/test.yml/badge.svg)
+
 # Real-time collaborative whiteboard
 
 Draw together in the browser. Open a room, share the link, and everyone sees each other's strokes and cursors live.
