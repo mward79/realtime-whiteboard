@@ -1,23 +1,22 @@
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
-import { randomUUID } from 'node:crypto';
 import { WebSocketServer } from 'ws';
-import { RoomManager, isCoord } from './rooms.js';
-import { createStorage } from './storage.js';
+import { createBackend } from './backend.js';
+import { Hub } from './hub.js';
 
 const PORT = process.env.PORT || 3000;
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
+const { storage, cluster } = await createBackend(REDIS_URL, { serverId: process.env.SERVER_ID });
+
 const app = express();
 app.use(express.static(fileURLToPath(new URL('./public', import.meta.url))));
-app.get('/health', (_req, res) => res.send('ok'));
+app.get('/health', (_req, res) => res.set('X-Server-Id', cluster.serverId).send('ok'));
 
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 64 * 1024 });
-const storage = await createStorage(REDIS_URL);
-const rooms = new RoomManager(storage);
-const socketsByRoom = new Map(); // roomId -> Set<WebSocket>
+const socketsByRoom = new Map(); // roomId -> Map<userId, WebSocket>, this server's clients only
 
 const clean = (v, max) => (v ?? '').toString().replace(/[^\w\- ]/g, '').trim().slice(0, max);
 
@@ -25,18 +24,17 @@ function send(ws, msg) {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
 }
 
-// Storage writes run in the background; the live room in memory is the source of
-// truth while people are connected, so a failed write is logged, not fatal.
-function persist(promise) {
-  promise.catch((err) => console.error('Storage write failed:', err.message));
-}
-
-function broadcast(roomId, msg, except) {
-  const data = JSON.stringify(msg);
-  for (const peer of socketsByRoom.get(roomId) ?? []) {
-    if (peer !== except && peer.readyState === peer.OPEN) peer.send(data);
-  }
-}
+const hub = new Hub({
+  storage,
+  cluster,
+  deliver(roomId, msg, exceptUserId) {
+    const data = JSON.stringify(msg);
+    for (const [userId, ws] of socketsByRoom.get(roomId) ?? []) {
+      if (userId !== exceptUserId && ws.readyState === ws.OPEN) ws.send(data);
+    }
+  },
+});
+hub.start();
 
 wss.on('connection', async (ws, req) => {
   const url = new URL(req.url, 'http://localhost');
@@ -46,29 +44,24 @@ wss.on('connection', async (ws, req) => {
   ws.isAlive = true;
   ws.on('pong', () => (ws.isAlive = true));
 
-  let room;
+  let joined;
   try {
-    room = await rooms.open(roomId);
+    joined = await hub.join(roomId, name);
   } catch (err) {
     console.error(`Could not load room ${roomId}:`, err.message);
     ws.close(1011, 'Could not load board');
     return;
   }
+  const { user, welcome } = joined;
   // They may have given up while the board was loading.
   if (ws.readyState !== ws.OPEN) {
-    rooms.release(roomId);
+    hub.leave(roomId, user.id);
     return;
   }
 
-  const userId = randomUUID();
-  const user = room.addUser(userId, name);
-
-  if (!socketsByRoom.has(roomId)) socketsByRoom.set(roomId, new Set());
-  socketsByRoom.get(roomId).add(ws);
-
-  // Late joiners get the full board state, including strokes still being drawn.
-  send(ws, { type: 'welcome', you: user, ...room.snapshot() });
-  broadcast(roomId, { type: 'user:join', user }, ws);
+  if (!socketsByRoom.has(roomId)) socketsByRoom.set(roomId, new Map());
+  socketsByRoom.get(roomId).set(user.id, ws);
+  send(ws, welcome);
 
   ws.on('message', (raw) => {
     let msg;
@@ -77,66 +70,15 @@ wss.on('connection', async (ws, req) => {
     } catch {
       return;
     }
-
-    switch (msg.type) {
-      case 'cursor':
-        if (isCoord(msg.x) && isCoord(msg.y)) {
-          broadcast(roomId, { type: 'cursor', userId, x: msg.x, y: msg.y }, ws);
-        }
-        break;
-
-      case 'stroke:begin': {
-        const stroke = room.beginStroke(userId, msg);
-        if (stroke) broadcast(roomId, { type: 'stroke:begin', stroke }, ws);
-        else send(ws, { type: 'stroke:rejected', id: msg.id });
-        break;
-      }
-
-      case 'stroke:points':
-        if (room.addPoints(userId, msg.id, msg.points)) {
-          broadcast(roomId, { type: 'stroke:points', id: msg.id, points: msg.points }, ws);
-        }
-        break;
-
-      case 'item:add': {
-        const item = room.addItem(userId, msg);
-        if (item) {
-          broadcast(roomId, { type: 'item:add', item }, ws);
-          persist(storage.putItem(roomId, item));
-        } else {
-          send(ws, { type: 'stroke:rejected', id: msg.id });
-        }
-        break;
-      }
-
-      case 'stroke:end': {
-        const stroke = room.endStroke(userId, msg.id);
-        if (stroke) persist(storage.putItem(roomId, stroke));
-        break;
-      }
-
-      case 'stroke:remove':
-        if (room.removeStroke(userId, msg.id)) {
-          broadcast(roomId, { type: 'stroke:remove', id: msg.id }, ws);
-          persist(storage.removeItem(roomId, msg.id));
-        }
-        break;
-
-      case 'clear':
-        room.clear();
-        broadcast(roomId, { type: 'clear' }, ws);
-        persist(storage.clear(roomId));
-        break;
-    }
+    const reply = hub.handle(roomId, user.id, msg);
+    if (reply) send(ws, reply);
   });
 
   ws.on('close', () => {
-    for (const stroke of room.removeUser(userId)) persist(storage.putItem(roomId, stroke));
     const peers = socketsByRoom.get(roomId);
-    peers.delete(ws);
-    if (peers.size === 0) socketsByRoom.delete(roomId);
-    broadcast(roomId, { type: 'user:leave', userId });
-    rooms.release(roomId);
+    peers?.delete(user.id);
+    if (peers?.size === 0) socketsByRoom.delete(roomId);
+    hub.leave(roomId, user.id);
   });
 });
 
@@ -153,21 +95,20 @@ const heartbeat = setInterval(() => {
 }, 30000);
 wss.on('close', () => clearInterval(heartbeat));
 
-// On deploys, save strokes still being drawn and let queued writes finish.
+// On deploys: everyone leaves properly (unfinished strokes saved, presence
+// removed, other servers told), then the connections close.
 async function shutdown() {
   clearInterval(heartbeat);
-  for (const roomId of socketsByRoom.keys()) {
-    const room = rooms.rooms.get(roomId);
-    for (const user of room ? [...room.users.keys()] : []) {
-      for (const stroke of room.removeUser(user)) persist(storage.putItem(roomId, stroke));
-    }
-  }
+  await hub.close();
   for (const ws of wss.clients) ws.close(1012, 'Server restarting');
   server.close();
+  await cluster.close().catch(() => {});
   await storage.close().catch(() => {});
   process.exit(0);
 }
 process.once('SIGTERM', shutdown);
 process.once('SIGINT', shutdown);
 
-server.listen(PORT, () => console.log(`Whiteboard running at http://localhost:${PORT} (storage: ${storage.constructor.name})`));
+server.listen(PORT, () => {
+  console.log(`Whiteboard running at http://localhost:${PORT} (server ${cluster.serverId.slice(0, 8)}, ${storage.constructor.name})`);
+});

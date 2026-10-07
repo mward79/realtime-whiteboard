@@ -1,7 +1,7 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { MemoryStorage, RedisStorage, BOARD_TTL_SECONDS } from './storage.js';
-import { Room, RoomManager, PALETTE } from './rooms.js';
+import { Room, PALETTE } from './rooms.js';
 
 const item = (id, seq, extra = {}) => ({
   id,
@@ -132,52 +132,7 @@ describe('RedisStorage', { skip: !redisUrl && 'set TEST_REDIS_URL to run against
   });
 });
 
-describe('RoomManager with storage', () => {
-  test('a room is loaded from storage the first time someone joins', async () => {
-    const storage = new MemoryStorage();
-    await storage.putItem('r', item('old', 0));
-    const rooms = new RoomManager(storage);
-    const room = await rooms.open('r');
-    assert.deepEqual([...room.strokes.keys()], ['old']);
-    assert.equal(room.strokes.get('old').done, true, 'loaded strokes cannot be extended');
-  });
-
-  test('simultaneous joins share one load and one room', async () => {
-    const storage = new MemoryStorage();
-    let loads = 0;
-    const load = storage.load.bind(storage);
-    storage.load = (id) => (loads++, load(id));
-    const rooms = new RoomManager(storage);
-    const [a, b] = await Promise.all([rooms.open('r'), rooms.open('r')]);
-    assert.equal(a, b);
-    await rooms.open('r');
-    assert.equal(loads, 1, 'cached after the first load');
-  });
-
-  test('an empty room is dropped from memory and reloaded from storage', async () => {
-    const storage = new MemoryStorage();
-    const rooms = new RoomManager(storage);
-    const room = await rooms.open('r');
-    room.addUser('a', 'Ada');
-    rooms.release('r');
-    assert.ok(rooms.rooms.has('r'), 'kept while someone is in it');
-    room.removeUser('a');
-    rooms.release('r');
-    assert.ok(!rooms.rooms.has('r'));
-    assert.notEqual(await rooms.open('r'), room);
-  });
-
-  test('a failed load is not cached, so the next join retries', async () => {
-    const storage = new MemoryStorage();
-    storage.load = async () => {
-      throw new Error('down');
-    };
-    const rooms = new RoomManager(storage);
-    await assert.rejects(rooms.open('r'));
-    delete storage.load;
-    assert.ok(await rooms.open('r'));
-  });
-
+describe('Draw order', () => {
   test('draw order survives a reload even when strokes finish out of order', async () => {
     const storage = new MemoryStorage();
     const room = new Room('r');
