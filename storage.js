@@ -11,9 +11,9 @@
 // load, putItem and removeItem push the board's expiry back, so a board
 // disappears once nobody has opened or changed it for the TTL.
 
-export const BOARD_TTL_SECONDS = 7 * 24 * 60 * 60;
+import { byDrawOrder } from './rooms.js';
 
-const byDrawOrder = (a, b) => a.seq - b.seq;
+export const BOARD_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 // Stored items are always finished; `done` is live-only state.
 const serialize = ({ done, ...item }) => JSON.stringify(item);
@@ -104,29 +104,4 @@ export class RedisStorage {
   async close() {
     await this.client.close();
   }
-}
-
-// REDIS_URL=memory:// keeps boards in process memory, for working without Redis.
-export async function createStorage(url) {
-  if (url.startsWith('memory:')) return new MemoryStorage();
-  const { createClient } = await import('redis');
-  let connected = false;
-  const client = createClient({
-    url,
-    socket: {
-      // Give up quickly at startup so a missing Redis is obvious; once running,
-      // keep retrying (writes queue up meanwhile and are sent on reconnect).
-      reconnectStrategy: (retries, err) => (!connected && retries >= 3 ? err : Math.min(200 * 2 ** retries, 5000)),
-    },
-  });
-  client.on('error', (err) => {
-    if (connected) console.error('Redis error:', err.message);
-  });
-  try {
-    await client.connect();
-  } catch (err) {
-    throw new Error(`Could not connect to Redis at ${url} (${err.message}). Start Redis, or set REDIS_URL=memory:// to run without it.`);
-  }
-  connected = true;
-  return new RedisStorage(client);
 }

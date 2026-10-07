@@ -95,3 +95,44 @@ test('only the owner can remove a shape or text', () => {
   assert.equal(room.removeStroke('b', 'i1'), false);
   assert.equal(room.removeStroke('a', 'i1'), true);
 });
+
+test('seqs follow the clock and stay above anything seen from another server', () => {
+  let now = 1000;
+  const room = new Room('r', { now: () => now });
+  const a = begin(room, 'a', { id: 'a' });
+  const b = begin(room, 'a', { id: 'b' });
+  assert.ok(b.seq > a.seq, 'increasing within one millisecond');
+  room.applyRemote({ type: 'item:add', item: { id: 'far', seq: 5_000_000, kind: 'line', points: [[0, 0], [1, 1]] } });
+  assert.ok(begin(room, 'a', { id: 'c' }).seq > 5_000_000, 'a server with a slow clock still sorts after what it saw');
+  now = 9000;
+  assert.ok(begin(room, 'a', { id: 'd' }).seq >= 9_000_000);
+});
+
+test('remote events are applied once and translated for local clients', () => {
+  const room = new Room('r');
+  const stroke = { id: 's', userId: 'x', kind: 'path', color: PALETTE[0], size: 4, erase: false, points: [[0, 0]], seq: 1 };
+  assert.equal(room.applyRemote({ type: 'stroke:begin', stroke }).type, 'stroke:begin');
+  assert.equal(room.applyRemote({ type: 'stroke:begin', stroke }), null, 'duplicate ignored');
+  assert.ok(room.applyRemote({ type: 'stroke:points', id: 's', points: [[1, 1]] }));
+  assert.equal(room.applyRemote({ type: 'stroke:end', stroke: { ...stroke, points: [[0, 0], [1, 1]] } }), null, 'clients already have it');
+  assert.equal(room.applyRemote({ type: 'stroke:points', id: 's', points: [[2, 2]] }), null, 'finished strokes stay finished');
+  assert.deepEqual(room.applyRemote({ type: 'stroke:end', stroke: { ...stroke, id: 'missed' } }).type, 'item:add', 'unknown strokes are sent whole');
+  assert.deepEqual(room.applyRemote({ type: 'stroke:remove', id: 's' }), { type: 'stroke:remove', id: 's' });
+  assert.equal(room.applyRemote({ type: 'stroke:remove', id: 's' }), null);
+});
+
+test('a clear only removes items drawn before it', () => {
+  const room = new Room('r');
+  room.applyRemote({ type: 'item:add', item: { id: 'old', seq: 10, points: [] } });
+  room.applyRemote({ type: 'item:add', item: { id: 'new', seq: 30, points: [] } });
+  room.applyRemote({ type: 'clear', upTo: 20 });
+  assert.deepEqual([...room.strokes.keys()], ['new']);
+  assert.ok(begin(room, 'a', { id: 'after' }).seq > 20);
+});
+
+test('users get a color nobody else in the room has', () => {
+  const room = new Room('r');
+  room.applyRemote({ type: 'user:join', user: { id: 'remote', name: 'R', color: '#2557d6' } });
+  const local = room.addUser('local', 'L');
+  assert.notEqual(local.color, '#2557d6');
+});
