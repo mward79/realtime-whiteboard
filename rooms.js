@@ -21,7 +21,15 @@ export class Room {
     this.strokes = new Map(); // insertion order = draw order (matters for the eraser)
     this.users = new Map();
     this.colorIndex = 0;
-    this.expiry = null;
+    this.nextSeq = 0; // stored with each item so draw order survives a reload
+  }
+
+  // Fill a freshly created room with finished items loaded from storage.
+  restore(items) {
+    for (const item of [...items].sort((a, b) => a.seq - b.seq)) {
+      this.strokes.set(item.id, { ...item, done: true });
+      this.nextSeq = Math.max(this.nextSeq, item.seq + 1);
+    }
   }
 
   get isEmpty() {
@@ -35,10 +43,18 @@ export class Room {
     return user;
   }
 
+  // Returns the strokes this finished, so the caller can save them.
   removeUser(id) {
     this.users.delete(id);
     // Finish any stroke they were mid-way through so it can't be appended to later.
-    for (const s of this.strokes.values()) if (s.userId === id) s.done = true;
+    const finished = [];
+    for (const s of this.strokes.values()) {
+      if (s.userId === id && !s.done) {
+        s.done = true;
+        finished.push(s);
+      }
+    }
+    return finished;
   }
 
   beginStroke(userId, { id, color, size, point, erase }) {
@@ -56,6 +72,7 @@ export class Room {
       size,
       erase: Boolean(erase),
       points: [point],
+      seq: this.nextSeq++,
       done: false,
     };
     this.strokes.set(id, stroke);
@@ -80,7 +97,7 @@ export class Room {
     if (!Number.isFinite(size) || size < 1 || size > MAX_SIZE) return null;
     if (!Array.isArray(points) || !points.every(isPoint)) return null;
 
-    const item = { id, userId, kind, color, size, erase: false, points: points.map(([x, y]) => [x, y]), done: true };
+    const item = { id, userId, kind, color, size, erase: false, points: points.map(([x, y]) => [x, y]), seq: 0, done: true };
     if (SHAPES.includes(kind)) {
       if (points.length !== 2) return null;
     } else if (kind === 'text') {
@@ -90,15 +107,17 @@ export class Room {
     } else {
       return null;
     }
+    item.seq = this.nextSeq++;
     this.strokes.set(id, item);
     return item;
   }
 
+  // Returns the stroke the first time it's finished, so it's saved exactly once.
   endStroke(userId, strokeId) {
     const s = this.strokes.get(strokeId);
-    if (!s || s.userId !== userId) return false;
+    if (!s || s.userId !== userId || s.done) return null;
     s.done = true;
-    return true;
+    return s;
   }
 
   removeStroke(userId, strokeId) {
@@ -117,32 +136,35 @@ export class Room {
   }
 }
 
+// Live rooms are cached in memory while anyone is in them. The first person to
+// join a room loads it from storage; when the last person leaves it's dropped
+// from memory, and storage's TTL decides how long the board survives.
 export class RoomManager {
-  constructor() {
+  constructor(storage) {
+    this.storage = storage;
     this.rooms = new Map();
+    this.loading = new Map(); // roomId -> Promise<Room>, so simultaneous joins share one load
   }
 
-  get(id) {
-    let room = this.rooms.get(id);
-    if (!room) {
-      room = new Room(id);
-      this.rooms.set(id, room);
+  async open(id) {
+    const cached = this.rooms.get(id);
+    if (cached) return cached;
+    if (!this.loading.has(id)) {
+      const load = this.storage
+        .load(id)
+        .then((items) => {
+          const room = new Room(id);
+          room.restore(items);
+          this.rooms.set(id, room);
+          return room;
+        })
+        .finally(() => this.loading.delete(id));
+      this.loading.set(id, load);
     }
-    if (room.expiry) {
-      clearTimeout(room.expiry);
-      room.expiry = null;
-    }
-    return room;
+    return this.loading.get(id);
   }
 
-  // Keep an empty room around for a while so a refresh doesn't wipe the drawing.
-  release(id, delayMs = 10 * 60 * 1000) {
-    const room = this.rooms.get(id);
-    if (!room || !room.isEmpty) return;
-    clearTimeout(room.expiry);
-    room.expiry = setTimeout(() => {
-      if (room.isEmpty) this.rooms.delete(id);
-    }, delayMs);
-    room.expiry.unref?.();
+  release(id) {
+    if (this.rooms.get(id)?.isEmpty) this.rooms.delete(id);
   }
 }

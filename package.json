@@ -9,9 +9,12 @@
     "dev": "node --watch server.js",
     "test": "node --test"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "express": "^4.21.0",
+    "redis": "^5.12.1",
     "ws": "^8.18.0"
   }
 }
