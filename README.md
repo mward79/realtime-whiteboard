@@ -4,6 +4,8 @@
 
 # Real-time collaborative whiteboard
 
+![Two servers syncing a board through Redis pub/sub](docs/whiteboard.gif)
+
 Draw together in the browser. Start a board from the menu, share the room code or link, and everyone sees each other's strokes, shapes, text and cursors live.
 
 ## Using it
